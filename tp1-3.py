@@ -13,7 +13,9 @@ else:
     data2 = None
 
 data3 = np.empty(1, np.float64)
+
 comm.Bcast(data1, root = 0)
 comm.Scatter(data2, data3, root = 0)
+
 comm.Barrier()
 print("rank: ", rank, " data1: ", data1, " data2: ", data2, " data3: ", data3, flush=True)
