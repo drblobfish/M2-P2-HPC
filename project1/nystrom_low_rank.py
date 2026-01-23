@@ -94,5 +94,5 @@ if j==0:
     Sk = S[:k]
     # step 6 : Uhat is (n,k)
     Uhat_i = Q_i @ Uk
-    # step 7 : Anyst is (n,n)
-    Anyst_i = A
+    # step 7 : Anyst is (n,n) we only need the diagonal to compute the nuclear norm
+    Anyst_ii = Uhat_i @ np.diag(Sk**2) @ Uhat_i.T
