@@ -3,6 +3,7 @@ import scipy
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 
 def randomized_nystrom_rank_k(A,k,I):
     n = A.shape[0]
@@ -14,21 +15,34 @@ def randomized_nystrom_rank_k(A,k,I):
     C = A @ Omega
     #step 2 : B is (I,I)
     B = Omega.T @ C
-    # L is (I,I)
-    L = np.linalg.cholesky(B)
-    # step 3 : Z is (n,I)
-    Z = scipy.linalg.solve_triangular(L,C.T).T
-    # step 4 : Q is (n,I); R is (I,I)
-    Q,R = np.linalg.qr(Z)
-    # step 5 : U,S are (I,I); Uk is (I,k); Sk is (k,k)
-    U,S,_ = np.linalg.svd(R)
-    Uk = U[:,:k]
-    Sk = S[:k]
-    # step 6 : Uhat is (n,k)
-    Uhat = Q @ Uk
-    # step 7 : Anyst is (n,n)
-    Anyst = Uhat @ np.diag(Sk**2) @ Uhat.T
-    return Anyst
+    use_cholesky = True
+    try :
+        # L is (I,I)
+        L = np.linalg.cholesky(B)
+    except :
+        # U,S,V are (I,I)
+        U,S,Vh = np.linalg.svd(B)
+        use_cholesky = False
+    if use_cholesky :
+        # step 3 : Z is (n,I)
+        Z = scipy.linalg.solve_triangular(L,C.T).T
+        # step 4 : Q is (n,I); R is (I,I)
+        Q,R = np.linalg.qr(Z)
+        # step 5 : U,S are (I,I); Uk is (I,k); Sk is (k,k)
+        U,S,_ = np.linalg.svd(R)
+        Uk = U[:,:k]
+        Sk = S[:k]
+        # step 6 : Uhat is (n,k)
+        Uhat = Q @ Uk
+        # step 7 : Anyst is (n,n)
+        Anyst = Uhat @ np.diag(Sk**2) @ Uhat.T
+    else :
+        # step 5 : Uk is (I,k); Sk is (k,k) ; Vhk is (k,I)
+        Uk = U[:,:k]
+        Sk = S[:k]
+        Vhk = U[:k,:]
+        Anyst = C @ Vhk.T.conj() @ np.diag(1/Sk) @ Uk.T.conj() @ C.T
+    return Anyst,use_cholesky
 
 def nuclear_norm(A):
     return np.sum(np.linalg.svd(A,compute_uv = False))
@@ -57,40 +71,33 @@ def prepare_dataset(A,c):
     return B
 
 # constants
-n = 1000
+n = 4000
 assert n<=60_000
-k = 200
-I = 600
 c = 100
 
-#k_scale = np.linspace(200,600,5,dtype=np.integer)
-#I_scale = [600,1000,2000,2500,3000]
-k_scale = np.linspace(20,60,50,dtype=np.integer)
-I_scale = [60,100,200,250,300]
+k_scale = np.linspace(200,600,5,dtype=np.integer)
+I_scale = [600,1000,2000,2500,3000]
+# k_scale = np.linspace(20,60,5,dtype=np.integer)
+# I_scale = [60,100,200,250,300]
 
 print("loading dataset")
 mat,_ = load_libsvm("mnist.scale",n,781)
 print("preparing dataset")
 A = prepare_dataset(mat,c)
-#A = np.random.normal(0,1,(n,n))
-#A = A @ A.T
 print(A)
-Anyst = randomized_nystrom_rank_k(A,k,I)
-err = trace_relative_error(A,Anyst)
-print(err)
-exit()
 
 result_df = pd.merge(pd.DataFrame({"I":I_scale}),pd.DataFrame({"k":k_scale}),how="cross")
 result_df["trace_error"] = 0.0
+result_df["use_cholesky"] = True;
 for i in range(result_df.shape[0]):
     I = result_df["I"][i]
     k = result_df["k"][i]
     print(f"experiment I={I} k={k}")
-    try :
-        Anyst = randomized_nystrom_rank_k(A,k,I)
-        err = trace_relative_error(A,Anyst)
-        result_df.loc[i,"trace_error"] = err
-    except :
-        result_df.loc[i,"trace_error"] = np.nan
+    Anyst,use_cholesky = randomized_nystrom_rank_k(A,k,I)
+    err = trace_relative_error(A,Anyst)
+    result_df.loc[i,"trace_error"] = err
+    result_df.loc[i,"use_cholesky"] = use_cholesky
 sns.lineplot(result_df,x="k",y="trace_error",hue="I")
+plt.savefig("error_plot"+time.strftime("%m_%d_%H_%M")+".pdf")
+
 plt.show()
