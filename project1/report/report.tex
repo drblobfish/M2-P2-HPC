@@ -1,0 +1,130 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+
+\title{Project 1 - Randomized Nyström}
+\author{Jules Herrmann}
+
+\begin{document}
+\maketitle
+
+\section{Sequencial Algorithm}
+
+Gaussian sketching matrices $\Omega \in \mathbb{R}^{n\times I}$ were used.
+
+The algorithm implemented is the one presented in the lecture slides (Algorithm~\ref{alg:chol}).
+
+\begin{algorithm}
+        \caption{Randomized rank $k$ Nyström, using Cholesky}\label{alg:chol}
+\begin{enumerate}
+\item Compute $C = A\Omega$
+\item Compute $B = \Omega^T C$
+\item Compute the Cholesky factorization $L L^T = B$
+\item Solve for $Z$ in $L Z^T = C^T$ by substitution
+\item Compute the QR factorization $QR = Z$
+\item Compute the truncated rank-k SVD of $R$ as $U_k \Sigma_k V_k$
+\item Compute $\hat{U}_k = QU_k$
+\item Output factorization $[\![A_{\text{Nyst}}]\!]_k = \hat{U}_k \Sigma_k^2 \hat{U}_k^T$
+\end{enumerate}
+\end{algorithm}
+
+The matrix $B$ often turned out to not be positive definite, requiring an alternative to the
+Cholesky decomposition. In this case, a Singular Value Decomposition (SVD) was used, giving the
+algorithm~\ref{alg:svd}.
+
+\begin{algorithm}
+        \caption{Randomized rank $k$ Nyström, using SVD}\label{alg:svd}
+\begin{enumerate}
+\item Compute $C = A\Omega$
+\item Compute $B = \Omega^T C$
+\item Compute the SVD $U' \Sigma' U'^* = B$
+\item Compute $Z = C U' \Sigma'^{-\frac{1}{2}}$
+\item Compute the QR factorization $QR = Z$
+\item Compute the truncated rank-k SVD of $R$ as $U_k \Sigma_k V_k$
+\item Compute $\hat{U}_k = QU_k$
+\item Output factorization $[\![A_{\text{Nyst}}]\!]_k = \hat{U}_k \Sigma_k^2 \hat{U}_k^T$
+\end{enumerate}
+\end{algorithm}
+
+This modified algorithm is correct, indeed,
+$$Z Z^T
+= C U' \Sigma'^{-\frac{1}{2}} (C U' \Sigma'^{-\frac{1}{2}})^T
+= C U' \Sigma'^{-\frac{1}{2}} \Sigma'^{-\frac{T}{2}} U'^T C^T$$
+
+$$= C U' \Sigma'^{-1} U'^T C^T
+= C B^+ C^T
+$$
+
+\section{Numerical Stability}
+
+The matrix $A$ was generated from the $n$ first rows of the MNIST dataset. The radial basis
+function $e^{- \frac{\| x_i - x_j \|^2}{\sigma} }$ was used to build a symmetric dense matrix, with
+$\sigma = 100$.
+The sequential algorithm was then performed on $A$ for different values of $I$ and $k$, with 20
+replication for each set of parameters.
+
+For each experiment, the algorithm~\ref{alg:chol} was always applied first. If the Cholesky
+factorization was unsuccessful because of a rank deficient $C$, the algorithm~\ref{alg:svd} was
+applied.
+
+The experiment was run on a low-end laptop, which had to be used to work on other projects while the
+code was running. For this reason, the size of $A$ was kept much lower than in the experiments
+presented in the reference article. A consequence of this is that the value of $I$ was relatively much closer
+to $n$ than in the reference article, for this reason $A$ and $\Omega$ often had a rank inferior to
+$I$, which prevented the use of the cholesky factorization. In nearly all the experiments,
+Algorithm~\ref{alg:svd} ended up being used.
+
+The resulting matrix $[\![A_{\text{Nyst}}]\!]_k$ was compared to the original matrix using the relative
+nuclear error, computed as 
+$$\frac{\| A - [\![A_{\text{Nyst}}]\!]_k \|_*}{\|A \|_*}$$
+where $\| . \|_*$ is the nuclear norm.
+
+\begin{figure}[htpb]
+        \centering
+        \includegraphics[width=0.8\textwidth]{error_plot01_25_15_55.pdf}
+        \caption{Trace error for varying $(k,I)$}
+        \label{fig:trace_error_500}
+\end{figure}
+
+The average of the trace error aggregated for each couple $(k,I)$ is reported in
+Figure~\ref{fig:trace_error_500}.
+
+The results don't show a very clear trend. This could be explained by the small size of our matrix,
+indeed, a small matrix $A$ means fewer random coefficient in $\Omega$, which, in turn, means a
+bigger impact of each individual random sample on the aggregated result.
+
+In addition, the parameters were not chosen proportionnally to those of the reference article, which
+could explain the dissimilar results.
+
+\section{Parallel Algorithm}
+
+The parallel implementation (Algorithm~\ref{alg:paral}) follows directly Algorithm~\ref{alg:svd}.
+
+
+\begin{algorithm}
+        \caption{Parallel Randomized rank $k$ Nyström, using SVD}\label{alg:paral}
+\begin{enumerate}
+        \item Each of the $P$ processor gets a coordinate $(i,j)$ to form a $\sqrt{P} \times
+                \sqrt{P}$ grid.
+        \item The matrix $A$ is distributed block-wise among the processor.
+        \item The processor $(0,0)$ chooses a set of $\sqrt{P}$ random seeds $S \in
+                \mathbb{N}^{\sqrt{P}}$ and broadcast them to
+                all the other processors.
+        \item Processor $(i,j)$ samples $\Omega_i$ and $\Omega_j$ using $S_i$ and $S_j$
+                respectively.
+        \item $C_i$ is reduced to the leader processor $(i,0)$ of each row
+        \item $B$ is reduced to the leader processor $(0,0)$
+        \item The leader processor $(0,0)$ computes $L^{-T}$ using the SVD of $B$
+        \item $L^{-T}$ is then broadcast to each row leader processor.
+        \item Each row leader processor can then compute $\hat{U}_{k,i}$ and $\Sigma_k$
+\end{enumerate}
+\end{algorithm}
+
+After step 9, we could distribute $\hat{U}_{k,i}$ and $\hat{U}_{k,j}$ to processor $(i,j)$,
+which would allow the obtention of $[\![A_{\text{Nyst}}]\!]_k$, distributed block-wised on the grid of
+processor. This might not be useful, depending on the operations that need to be applied on
+$[\![A_{\text{Nyst}}]\!]_k$.
+
+\end{document}
