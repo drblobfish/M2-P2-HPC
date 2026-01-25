@@ -8,9 +8,9 @@ import time
 def randomized_nystrom_rank_k(A,k,I):
     n = A.shape[0]
     assert A.shape[1] == n,"A must be square"
-    rng_i = np.random.default_rng()
+    rng = np.random.default_rng()
     # Omega is (n,I)
-    Omega = rng_i.normal(0,1,(n,I))
+    Omega = rng.normal(0,1,(n,I))
     # step 1 : C is (n,I)
     C = A @ Omega
     #step 2 : B is (I,I)
@@ -21,7 +21,7 @@ def randomized_nystrom_rank_k(A,k,I):
         L = np.linalg.cholesky(B)
     except :
         # U,S,V are (I,I)
-        U,S,Vh = np.linalg.svd(B)
+        U,S,Vh = np.linalg.svd(B,hermitian=True)
         use_cholesky = False
     if use_cholesky :
         # step 3 : Z is (n,I)
@@ -71,14 +71,15 @@ def prepare_dataset(A,c):
     return B
 
 # constants
-n = 4000
+n = 300
 assert n<=60_000
 c = 100
+replication = 20
 
-k_scale = np.linspace(200,600,5,dtype=np.integer)
-I_scale = [600,1000,2000,2500,3000]
-# k_scale = np.linspace(20,60,5,dtype=np.integer)
-# I_scale = [60,100,200,250,300]
+# k_scale = np.linspace(200,600,5,dtype=np.integer)
+# I_scale = [600,1000,2000,2500,3000]
+k_scale = np.linspace(20,60,5,dtype=np.integer)
+I_scale = [60,100,200,250,300]
 
 print("loading dataset")
 mat,_ = load_libsvm("mnist.scale",n,781)
@@ -86,7 +87,7 @@ print("preparing dataset")
 A = prepare_dataset(mat,c)
 print(A)
 
-result_df = pd.merge(pd.DataFrame({"I":I_scale}),pd.DataFrame({"k":k_scale}),how="cross")
+result_df = pd.merge(pd.DataFrame({"I":I_scale}),pd.DataFrame({"k":k_scale}),how="cross").merge(pd.DataFrame({"replication":np.arange(replication,dtype = np.int32)}),how="cross")
 result_df["trace_error"] = 0.0
 result_df["use_cholesky"] = True;
 for i in range(result_df.shape[0]):
@@ -97,7 +98,9 @@ for i in range(result_df.shape[0]):
     err = trace_relative_error(A,Anyst)
     result_df.loc[i,"trace_error"] = err
     result_df.loc[i,"use_cholesky"] = use_cholesky
-sns.lineplot(result_df,x="k",y="trace_error",hue="I")
+
+aggregated_df = result_df.groupby(["I","k"])["trace_error"].mean().reset_index()
+sns.lineplot(aggregated_df,x="k",y="trace_error",hue="I")
 plt.savefig("error_plot"+time.strftime("%m_%d_%H_%M")+".pdf")
 
 plt.show()
