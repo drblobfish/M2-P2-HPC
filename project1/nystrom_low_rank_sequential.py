@@ -17,31 +17,29 @@ def randomized_nystrom_rank_k(A,k,I):
     B = Omega.T @ C
     use_cholesky = True
     try :
-        # L is (I,I)
+        # L is (I,I) and lower triangular
         L = np.linalg.cholesky(B)
     except :
-        # U,S,V are (I,I)
-        U,S,Vh = np.linalg.svd(B,hermitian=True)
+        # U,S,V are (I,I), since B is symmetric, U = V
+        U,S,_ = np.linalg.svd(B,hermitian=True)
         use_cholesky = False
+    # step 3 : Z is (n,I)
     if use_cholesky :
-        # step 3 : Z is (n,I)
-        Z = scipy.linalg.solve_triangular(L,C.T).T
-        # step 4 : Q is (n,I); R is (I,I)
-        Q,R = np.linalg.qr(Z)
-        # step 5 : U,S are (I,I); Uk is (I,k); Sk is (k,k)
-        U,S,_ = np.linalg.svd(R)
-        Uk = U[:,:k]
-        Sk = S[:k]
-        # step 6 : Uhat is (n,k)
-        Uhat = Q @ Uk
-        # step 7 : Anyst is (n,n)
-        Anyst = Uhat @ np.diag(Sk**2) @ Uhat.T
+        # if we used cholesky, L is triangular
+        Z = scipy.linalg.solve_triangular(L,C.T,lower=True).T
     else :
-        # step 5 : Uk is (I,k); Sk is (k,k) ; Vhk is (k,I)
-        Uk = U[:,:k]
-        Sk = S[:k]
-        Vhk = U[:k,:]
-        Anyst = C @ Vhk.T.conj() @ np.diag(1/Sk) @ Uk.T.conj() @ C.T
+        # if we used SVD, we have a simple expression for L^{-T}
+        Z = C @ U @ np.diag(1/np.sqrt(S))
+    # step 4 : Q is (n,I); R is (I,I)
+    Q,R = np.linalg.qr(Z)
+    # step 5 : U,S are (I,I); Uk is (I,k); Sk is (k,k)
+    U,S,_ = np.linalg.svd(R)
+    Uk = U[:,:k]
+    Sk = S[:k]
+    # step 6 : Uhat is (n,k)
+    Uhat = Q @ Uk
+    # step 7 : Anyst is (n,n)
+    Anyst = Uhat @ np.diag(Sk**2) @ Uhat.T
     return Anyst,use_cholesky
 
 def nuclear_norm(A):
@@ -71,7 +69,7 @@ def prepare_dataset(A,c):
     return B
 
 # constants
-n = 300
+n = 500
 assert n<=60_000
 c = 100
 replication = 20
@@ -100,7 +98,8 @@ for i in range(result_df.shape[0]):
     result_df.loc[i,"use_cholesky"] = use_cholesky
 
 aggregated_df = result_df.groupby(["I","k"])["trace_error"].mean().reset_index()
-sns.lineplot(aggregated_df,x="k",y="trace_error",hue="I")
+param_string = f"n = {n}, c = {c}, replication = {replication}"
+sns.lineplot(aggregated_df,x="k",y="trace_error",hue="I").set(title = param_string)
 plt.savefig("error_plot"+time.strftime("%m_%d_%H_%M")+".pdf")
 
 plt.show()

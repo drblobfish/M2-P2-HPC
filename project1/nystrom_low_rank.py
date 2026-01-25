@@ -9,7 +9,7 @@ def mpi_assert(cond,message = None):
         print("[ASSERT FAILED]",message)
     exit()
 
-def mpi_qr(Ai):
+def mpi_qr(comm,Ai):
     """
     A is an n,n matrix that is stored as block of rows on the processors
     Ai is the block of rows of A owned by the processor
@@ -56,11 +56,14 @@ block_size = int(n/sqrtP)
 i = rank % sqrtP
 j = rank // sqrtP
 
+row_comm = comm.Split(i,j)
+col1_comm = comm.Split(0 if j==0 else MPI.UNDEFINED,i)
+
 # A_{kl} = kl
 Aij = (np.arange(i*block_size,(i+1)*block_size,dtype=np.double).reshape(-1,1) *
        np.arange(j*block_size,(j+1)*block_size,dtype=np.double))
 
-seeds = None
+seeds = np.empty(P,dtype=np.uint32)
 if rank == 0:
     seeds = np.random.randint(np.iinfo(np.uint32).max, size=sqrtP, dtype=np.uint32)
 
@@ -72,27 +75,30 @@ Omega_i = rng_i.normal(0,1,(block_size,I))
 Omega_j = rng_j.normal(0,1,(block_size,I))
 # step 1 : C is (n,I)
 C_ij = Aij @ Omega_j
-C_i = None
-comm.Reduce(C_ij,C_i,MPI.SUM,i)
+C_i = np.empty_like(C_ij)
+row_comm.Reduce(C_ij,C_i,MPI.SUM,0)
 # step 2 : B is (I,I); L is (I,I)
 B_ij = Omega_i.T @ C_ij
-B = None
-L = None
+B = np.empty_like(B_ij)
 comm.Reduce(B_ij,B,MPI.SUM,0)
-if rank == 0:
-    L = np.linalg.cholesky(B)
-comm.Bcast(L,0)
-# step 3 : Z is (n,I)
 if j==0:
-    Z_i = np.empty_like(C_i)
-    Z_i = scipy.linalg.solve_triangular(L,C_i.T).T
+    Linv = np.empty_like(B_ij)
+    if rank == 0:
+        U,S,_ = np.linalg.svd(B,hermitian=True)
+        Linv = U @ np.diag(1/np.sqrt(S))
+    col1_comm.Bcast(Linv,0)
+    # step 3 : Z is (n,I)
+    Z_i = C_i @ Linv
     # step 4 : Q is (n,I); R is (I,I)
-    Q_i,R = mpi_qr(Z_i)
+    Q_i,R = mpi_qr(col1_comm,Z_i)
     # step 5 : U,S are (I,I); Uk is (I,k); Sk is (k,k)
     U,S,_ = np.linalg.svd(R)
     Uk = U[:,:k]
     Sk = S[:k]
     # step 6 : Uhat is (n,k)
     Uhat_i = Q_i @ Uk
-    # step 7 : Anyst is (n,n) we only need the diagonal to compute the nuclear norm
+    # step 7 : Anyst is (n,n), we can compute its diagonal blocks easily
     Anyst_ii = Uhat_i @ np.diag(Sk**2) @ Uhat_i.T
+    # at this point if we need the entirety of Anyst distributed on all P
+    # processor like A, we need to do extra work. This might not be useful
+    # depending on how we plan to use Anyst
