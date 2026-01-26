@@ -26,6 +26,13 @@ def mesh(nx,ny,Lx,Ly):
    elt = np.reshape(p, (2*(nx-1)*(ny-1),3))
    return vtx, elt 
 
+def local_mesh(nx,ny,Lx,Ly,j,J):
+    local_ny = ((ny-1)//J)+1
+    local_Ly = Ly/J
+    vtx, elt =  mesh(nx,local_ny,Lx,local_Ly)
+    vtx[:,1] += j*local_Ly
+    return vtx, elt
+
 def boundary(nx, ny):
     bottom = np.hstack((np.arange(0,nx-1,1)[:,na],
                         np.arange(1,nx,1)[:,na]))
@@ -36,6 +43,21 @@ def boundary(nx, ny):
     right  = np.hstack((np.arange(nx-1,nx*(ny-1),nx)[:,na],
                         np.arange(2*nx-1,nx*ny,nx)[:,na]))
     return np.vstack((bottom, top, left, right))
+
+def local_boundary(nx,ny,j,J):
+    local_ny = ((ny-1)//J)+1
+    local_Ly = Ly/J
+    bottom = np.hstack((np.arange(0,nx-1,1)[:,na],
+                        np.arange(1,nx,1)[:,na]))
+    top    = np.hstack((np.arange(nx*(local_ny-1),nx*local_ny-1,1)[:,na],
+                        np.arange(nx*(local_ny-1)+1,nx*local_ny,1)[:,na]))
+    left   = np.hstack((np.arange(0,nx*(local_ny-1),nx)[:,na],
+                        np.arange(nx,nx*local_ny,nx)[:,na]))
+    right  = np.hstack((np.arange(nx-1,nx*(local_ny-1),nx)[:,na],
+                        np.arange(2*nx-1,nx*local_ny,nx)[:,na]))
+    beltj_artf = np.vstack((bottom, top))
+    beltj_phys = np.vstack((bottom, top, left, right))
+    return beltj_phys,beltj_artf
 
 def get_area(vtx, elt):
     d = np.size(elt, 1)
