@@ -55,9 +55,51 @@ def local_boundary(nx,ny,j,J):
                         np.arange(nx,nx*local_ny,nx)[:,na]))
     right  = np.hstack((np.arange(nx-1,nx*(local_ny-1),nx)[:,na],
                         np.arange(2*nx-1,nx*local_ny,nx)[:,na]))
-    beltj_artf = np.vstack((bottom, top))
+    if j == 0:
+        beltj_artf = top
+    elif j == J-1:
+        beltj_artf = bottom
+    else :
+        beltj_artf = np.vstack((bottom, top))
     beltj_phys = np.vstack((bottom, top, left, right))
     return beltj_phys,beltj_artf
+
+def Rj_matrix(nx,ny,j,J):
+    local_ny = ((ny-1)//J)+1
+    block_size = nx*local_ny
+    block_shift = nx * (local_ny-1)
+    Rj = np.zeros((block_size,nx*ny))
+    Rj[:,j*block_shift:j*block_shift + block_size] = np.eye(block_size)
+    return Rj
+
+def Bj_matrix(nx,ny,j,J):
+    local_ny = ((ny-1)//J)+1
+    block_size = nx*local_ny
+    if j == 0:
+        Bj = np.zeros((nx,block_size))
+        Bj[:,-nx:] = np.eye(nx)
+    elif j == J-1:
+        Bj = np.zeros((nx,block_size))
+        Bj[:,:nx] = np.eye(nx)
+    else :
+        Bj = np.zeros((2*nx,block_size))
+        Bj[:nx,:nx] = np.eye(nx)
+        Bj[nx:,-nx:] = np.eye(nx)
+    return Bj
+
+def Cj_matrix(nx,ny,j,J):
+    nb_interface = J-1
+    if j == 0:
+        Cj = np.zeros((nx,nx*nb_interface))
+        Cj[:,j*nx:(j+1)*nx] = np.eye(nx)
+    elif j == J-1:
+        Cj = np.zeros((nx,nx*nb_interface))
+        Cj[:,(j-1)*nx:j*nx] = np.eye(nx)
+    else :
+        Cj = np.zeros((2*nx,nx*nb_interface))
+        Cj[:nx,(j-1)*nx:j*nx] = np.eye(nx)
+        Cj[nx:,j*nx:(j+1)*nx] = np.eye(nx)
+    return Cj
 
 def get_area(vtx, elt):
     d = np.size(elt, 1)
