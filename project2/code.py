@@ -143,6 +143,22 @@ def stiffness(vtx, elt):
            K += csr_matrix((val, (row, col)), shape=(nv, nv))
     return K
 
+def Aj_matrix(vtx,elt,beltj_phys,k):
+    M = mass(vtx, elt)
+    Mb = mass(vtx, beltj_phys)
+    K = stiffness(vtx, elt)
+    Aj = K - k**2 * M - 1j * k * Mb
+    return Aj
+
+def Tj_matrix(vtx,beltj_artf,Bj,k):
+    Tj = k * Bj @ mass(vtx,beltj_artf) @ Bj.T
+    return Tj
+
+def Sj_factorization(Aj,Tj,Bj):
+    local_problem_matrix = Aj - 1j * Bj.T @ Tj @ Bj
+    fact = spla.splu(local_problem_matrix)
+    return fact
+
 def point_source(sp, k):    
     def ps(x):
         v = np.zeros(np.size(x,0), float)
@@ -150,6 +166,12 @@ def point_source(sp, k):
             v += s[2]*np.exp(-10*(k/(2.0*pi))**2 * la.norm(x - s[na,0:2], axis=1)**2)
         return v
     return ps 
+
+def bj_vector(vtx,elt,sp,k):
+    M = mass(vtx, elt)
+    b = M @ point_source(sp,k)(vtx) # linear system RHS (source term)
+    return b
+    
 
 def plot_mesh(vtx, elt, val=None, **kwargs):
     trig = mtri.Triangulation(vtx[:,0], vtx[:,1], elt)
