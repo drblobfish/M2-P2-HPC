@@ -70,7 +70,7 @@ def Rj_matrix(nx,ny,j,J):
     block_shift = nx * (local_ny-1)
     Rj = np.zeros((block_size,nx*ny))
     Rj[:,j*block_shift:j*block_shift + block_size] = np.eye(block_size)
-    return Rj
+    return csr_matrix(Rj)
 
 def Bj_matrix(nx,ny,j,J):
     local_ny = ((ny-1)//J)+1
@@ -85,21 +85,21 @@ def Bj_matrix(nx,ny,j,J):
         Bj = np.zeros((2*nx,block_size))
         Bj[:nx,:nx] = np.eye(nx)
         Bj[nx:,-nx:] = np.eye(nx)
-    return Bj
+    return csr_matrix(Bj)
 
 def Cj_matrix(nx,ny,j,J):
     nb_interface = J-1
+    S_size = 2*nx*nb_interface
     if j == 0:
-        Cj = np.zeros((nx,nx*nb_interface))
-        Cj[:,j*nx:(j+1)*nx] = np.eye(nx)
+        Cj = np.zeros((nx,S_size))
+        Cj[:,:nx] = np.eye(nx)
     elif j == J-1:
-        Cj = np.zeros((nx,nx*nb_interface))
-        Cj[:,(j-1)*nx:j*nx] = np.eye(nx)
+        Cj = np.zeros((nx,S_size))
+        Cj[:,(2*j-1)*nx:] = np.eye(nx)
     else :
-        Cj = np.zeros((2*nx,nx*nb_interface))
-        Cj[:nx,(j-1)*nx:j*nx] = np.eye(nx)
-        Cj[nx:,j*nx:(j+1)*nx] = np.eye(nx)
-    return Cj
+        Cj = np.zeros((2*nx,S_size))
+        Cj[:,(2*j-1)*nx:(2*j+1)*nx] = np.eye(2*nx)
+    return csr_matrix(Cj)
 
 def get_area(vtx, elt):
     d = np.size(elt, 1)
@@ -171,7 +171,36 @@ def bj_vector(vtx,elt,sp,k):
     M = mass(vtx, elt)
     b = M @ point_source(sp,k)(vtx) # linear system RHS (source term)
     return b
+
+def S_operator(fact,B,T,C):
+    def S(x):
+        res = x.astype(np.complex128).copy() # identity
+        for i,(factj,Bj,Tj,Cj) in enumerate(zip(fact,B,T,C)):
+            res += 2*1j* Cj.T@Bj@(factj.solve(Bj.T @ Tj @ Cj @ x))
+        return res
+    return S
+
+def Pi_operator(nx,J):
+    nb_interface = J-1
+    S_size = 2*nx*nb_interface
+    # x is a vector of size 
+    def Pi(x) :
+        return x.reshape(nx,2,nb_interface)[:,(1,0),:].reshape(-1)
+    return Pi
     
+def g_vector(fact,B,C,b,Pi):
+    S_size = C[0].shape[1]
+    intermediate_res = np.zeros(S_size,dtype=np.complex128)
+    for i,(factj,Bj,Cj,bj) in enumerate(zip(fact,B,C,b)):
+        intermediate_res -= 2j * Cj.T @ Bj @ (factj.solve(bj))
+    return Pi(intermediate_res)
+
+def solve_fixed_point(Pi,S,g,relax):
+    p = np.zeros_like(g)
+    for i in range(nb_iter):
+        p = (1-relax)*p - relax*Pi(S(p)) + relax * g
+    return p
+
 
 def plot_mesh(vtx, elt, val=None, **kwargs):
     trig = mtri.Triangulation(vtx[:,0], vtx[:,1], elt)
@@ -183,6 +212,49 @@ def plot_mesh(vtx, elt, val=None, **kwargs):
                       cmap=cm.jet, **kwargs)
     plt.axis('equal')
 
+Lx = 1           # Length in x direction
+Ly = 1           # Length in y direction
+nx = 2           # Number of points in x direction
+ny = 7           # Number of points in y direction
+k  = 1           # Wavenumber of the problem
+ns = 1           # Number of point sources + random position and weight below
+J  = 3           # Number of domains
+
+j = 0
+
+sp = [np.random.rand(3) * [Lx, Ly, 50.0] for _ in np.arange(ns)]
+fact = []
+B = []
+T = []
+C = []
+b = []
+for j in range(J):
+    vtx,elt = local_mesh(nx,ny,Lx,Ly,j,J)
+    beltj_phys,beltj_artf = local_boundary(nx,ny,j,J)
+    Rj = Rj_matrix(nx,ny,j,J)
+    Bj = Bj_matrix(nx,ny,j,J)
+    Cj = Cj_matrix(nx,ny,j,J)
+    Aj = Aj_matrix(vtx,elt,beltj_phys,k)
+    Tj = Tj_matrix(vtx,beltj_artf,Bj,k)
+    factj = Sj_factorization(Aj,Tj,Bj)
+    bj = bj_vector(vtx,elt,sp,k)
+    fact.append(factj)
+    B.append(Bj)
+    T.append(Tj)
+    C.append(Cj)
+    b.append(bj)
+
+S = S_operator(fact,B,T,C)
+Pi = Pi_operator(nx,J)
+g = g_vector(fact,B,C,b,Pi)
+
+p = np.zeros_like(g)
+for i in range(nb_iter):
+    p = (1-relax)*p - relax*Pi(S(p)) + relax * g
+    u = 
+return p
+
+exit()
 ## Example resolution of model problem
 Lx = 1           # Length in x direction
 Ly = 2           # Length in y direction
