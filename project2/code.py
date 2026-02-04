@@ -90,6 +90,8 @@ def Bj_matrix(nx,ny,j,J):
 def Cj_matrix(nx,ny,j,J):
     nb_interface = J-1
     S_size = 2*nx*nb_interface
+    if J == 1:
+        return np.zeros((nx,S_size))
     if j == 0:
         Cj = np.zeros((nx,S_size))
         Cj[:,:nx] = np.eye(nx)
@@ -201,43 +203,63 @@ def solve_fixed_point(Pi,S,g,relax):
         p = (1-relax)*p - relax*Pi(S(p)) + relax * g
     return p
 
+def uj_solution(p,factj,Bj,Tj,Cj,bj):
+    return factj.solve(Bj.T @ Tj @ Cj @ p + bj)
 
-def plot_mesh(vtx, elt, val=None, **kwargs):
+def u_solution(p,fact,B,T,C,b):
+    return [uj_solution(p,factj,Bj,Tj,Cj,bj) for factj,Bj,Tj,Cj,bj in zip(fact,B,T,C,b)]
+
+def plot_mesh(vtx, elt, val=None,ax=None, **kwargs):
     trig = mtri.Triangulation(vtx[:,0], vtx[:,1], elt)
     if val is None:
-        plt.triplot(trig, **kwargs)
+        (ax if ax != None else plt).triplot(trig, **kwargs)
     else:
-        plt.tripcolor(trig, val,
+        (ax if ax != None else plt).tripcolor(trig, val,
                       shading='gouraud',
                       cmap=cm.jet, **kwargs)
-    plt.axis('equal')
+    # plt.axis('equal')
 
-Lx = 1           # Length in x direction
-Ly = 1           # Length in y direction
+
 nx = 2           # Number of points in x direction
 ny = 7           # Number of points in y direction
+Lx = 1*nx           # Length in x direction
+Ly = 1*ny           # Length in y direction
 k  = 1           # Wavenumber of the problem
 ns = 1           # Number of point sources + random position and weight below
-J  = 3           # Number of domains
 
-j = 0
+# Lx = 1           # Length in x direction
+# Ly = 2           # Length in y direction
+# nx = 1 + Lx * 32 # Number of points in x direction
+# ny = 1 + Ly * 32 # Number of points in y direction
+# k = 16           # Wavenumber of the problem
+# ns = 1           # Number of point sources + random position and weight below
+
+J  = 3           # Number of domains
+assert (ny-1) % J == 0, "ny-1 must be a multiple of J"
+max_iter = 100
+relax = 0.5
 
 sp = [np.random.rand(3) * [Lx, Ly, 50.0] for _ in np.arange(ns)]
+
+vtx = []
+elt = []
 fact = []
 B = []
 T = []
 C = []
 b = []
 for j in range(J):
-    vtx,elt = local_mesh(nx,ny,Lx,Ly,j,J)
+    vtxj,eltj = local_mesh(nx,ny,Lx,Ly,j,J)
     beltj_phys,beltj_artf = local_boundary(nx,ny,j,J)
     Rj = Rj_matrix(nx,ny,j,J)
     Bj = Bj_matrix(nx,ny,j,J)
     Cj = Cj_matrix(nx,ny,j,J)
-    Aj = Aj_matrix(vtx,elt,beltj_phys,k)
-    Tj = Tj_matrix(vtx,beltj_artf,Bj,k)
+    Aj = Aj_matrix(vtxj,eltj,beltj_phys,k)
+    Tj = Tj_matrix(vtxj,beltj_artf,Bj,k)
     factj = Sj_factorization(Aj,Tj,Bj)
-    bj = bj_vector(vtx,elt,sp,k)
+    bj = bj_vector(vtxj,eltj,sp,k)
+    vtx.append(vtxj)
+    elt.append(eltj)
     fact.append(factj)
     B.append(Bj)
     T.append(Tj)
@@ -247,31 +269,51 @@ for j in range(J):
 S = S_operator(fact,B,T,C)
 Pi = Pi_operator(nx,J)
 g = g_vector(fact,B,C,b,Pi)
+norm_g = np.linalg.norm(g)
 
+relative_error = 1
+relative_errors = []
 p = np.zeros_like(g)
-for i in range(nb_iter):
-    p = (1-relax)*p - relax*Pi(S(p)) + relax * g
-    u = 
-return p
+iteration = 0
+while iteration < max_iter and relative_error > 1e-5:
+    r = g - p + Pi(S(p))
+    relative_error = np.linalg.norm(r)/norm_g
+    relative_errors.append(relative_error)
+    p += relax * r
+    iteration += 1
+
+plt.plot(relative_errors)
+plt.show()
+
+u =  u_solution(p,fact,B,T,C,b)
+
+vtx_global, elt_global = mesh(nx, ny, Lx, Ly)
+belt = boundary(nx, ny)
+M = mass(vtx_global, elt_global)
+Mb = mass(vtx_global, belt)
+K = stiffness(vtx_global, elt_global)
+A = K - k**2 * M - 1j*k*Mb      # matrix of linear system 
+b_global = M @ point_source(sp,k)(vtx_global) # linear system RHS (source term)
+x = spla.spsolve(A, b_global)          # solution of linear system via direct solver
+
+fig,axs = plt.subplots(J,2)
+axs = axs.reshape(J,2) # necessary for case J=1
+gridspec = axs[0,0].get_gridspec()
+for ax in axs[:,1]:
+    ax.remove()
+
+globalax = fig.add_subplot(gridspec[:,1])
+
+for uj,vtxj,eltj,ax in zip(u,vtx,elt,axs[::-1,0]):
+    ax.set_aspect('equal')
+    plot_mesh(vtxj,eltj,np.real(uj),ax=ax)
+
+globalax.set_aspect('equal')
+plot_mesh(vtx_global,elt_global,np.real(x),ax=globalax)
+
+plt.show()
 
 exit()
-## Example resolution of model problem
-Lx = 1           # Length in x direction
-Ly = 2           # Length in y direction
-nx = 1 + Lx * 32 # Number of points in x direction
-ny = 1 + Ly * 32 # Number of points in y direction
-k = 16           # Wavenumber of the problem
-ns = 8           # Number of point sources + random position and weight below
-sp = [np.random.rand(3) * [Lx, Ly, 50.0] for _ in np.arange(ns)]
-vtx, elt = mesh(nx, ny, Lx, Ly)
-belt = boundary(nx, ny)
-M = mass(vtx, elt)
-Mb = mass(vtx, belt)
-K = stiffness(vtx, elt)
-A = K - k**2 * M - 1j*k*Mb      # matrix of linear system 
-b = M @ point_source(sp,k)(vtx) # linear system RHS (source term)
-x = spla.spsolve(A, b)          # solution of linear system via direct solver
-
 # GMRES
 residuals = [] # storage of GMRES residual history
 def callback(x):
@@ -281,8 +323,8 @@ print("Total number of GMRES iterations = ", len(residuals))
 print("Direct vs GMRES error            = ", la.norm(y - x))
 
 # Plots
-plot_mesh(vtx, elt) # slow for fine meshes
-plt.show()
+# plot_mesh(vtx, elt) # slow for fine meshes
+# plt.show()
 plot_mesh(vtx, elt, np.real(x))
 plt.colorbar()
 plt.show()
